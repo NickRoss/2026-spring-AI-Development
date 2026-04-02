@@ -110,7 +110,14 @@ Return ONLY valid JSON, no additional text."""
                     "usage": data.get("usage", {}),
                 }
 
-            result = json.loads(content)
+            # Strip markdown code fences if present
+            cleaned = content.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1]  # remove ```json line
+                cleaned = cleaned.rsplit("```", 1)[0]  # remove trailing ```
+                cleaned = cleaned.strip()
+
+            result = json.loads(cleaned)
 
             return {
                 "result": result,
