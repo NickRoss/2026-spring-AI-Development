@@ -144,7 +144,7 @@
                         {% set key = (rid, team) %}
                         {% if key in grid %}
                         <div class="score">{{ grid[key].score }}</div>
-                        {% if grid[key].cost %}<div class="cost">${{ "%.4f"|format(grid[key].cost) }}</div>{% endif %}
+                        {% if grid[key].cost %}<div class="cost">${{ "%.5f"|format(grid[key].cost) }}</div>{% endif %}
                         <div class="timestamp">{{ grid[key].submitted_at }}</div>
                         {% else %}
                         <span class="empty-cell">-</span>

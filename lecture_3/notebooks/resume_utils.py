@@ -119,7 +119,7 @@ Resume:
             parsed = output_schema.model_validate_json(content)
 
             usage = data.get("usage", {})
-            cost = usage.get("total_cost")
+            cost = usage.get("cost")
 
             return {
                 "result": parsed.model_dump(),
