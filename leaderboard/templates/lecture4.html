@@ -429,7 +429,18 @@
     <script>
         const emailData = {{ email_data | tojson }};
 
-        setTimeout(() => location.reload(), 10000);
+        function scheduleRefresh() {
+            setTimeout(() => {
+                const modalOpen = document.getElementById('cellModal').classList.contains('show');
+                const overlayOpen = document.getElementById('emailOverlay').classList.contains('show');
+                if (modalOpen || overlayOpen) {
+                    scheduleRefresh();
+                } else {
+                    location.reload();
+                }
+            }, 10000);
+        }
+        scheduleRefresh();
 
         const API_KEY = "{{ api_key }}";
         const LECTURE = "lecture4";
