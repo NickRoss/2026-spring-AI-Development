@@ -1,16 +1,23 @@
-"""Utility functions for building a resume outreach agent."""
+"""Agent utilities for Lecture 4: agentic resume outreach.
 
-from typing import Any, Dict
+This module provides the agent loop machinery and LLM call helpers.
+For resume loading and leaderboard submission, use resume_utils.py
+(shared across all lectures).
+"""
+
+from typing import Any, Dict, Type, Union
 import httpx
 import json
-import csv
+
+from pydantic import BaseModel
 
 
-# Leaderboard base URL
 LEADERBOARD_BASE_URL = "http://ai-leaderboard.site"
 
-# The optimized scoring prompt from Lecture 3.
-# This is a template — {job_req} gets filled in at runtime.
+# ---------------------------------------------------------------------------
+# Scoring prompt from Lecture 3 (template — fill {job_req} at runtime)
+# ---------------------------------------------------------------------------
+
 SCORING_PROMPT_TEMPLATE = """Score this resume against the job requirements below. Return a JSON object with exactly two fields: "score" (integer 0-100) and "reasoning" (1-3 sentences).
 
 ---
@@ -74,77 +81,89 @@ A junior developer under 3 years must score 70-79 even with the right stack.
 Only candidates with 5+ years AND C#/.NET AND SQL AND a JS framework should score 85+."""
 
 
-def load_resumes(csv_path: str) -> Dict[str, Dict[str, str]]:
-    """
-    Load all resumes from CSV into a dictionary.
+# ---------------------------------------------------------------------------
+# Pydantic models for structured output
+# ---------------------------------------------------------------------------
 
-    Args:
-        csv_path: Path to the resumes CSV file
-
-    Returns:
-        Dict mapping resume ID to resume data (ID, Resume_str, Resume_html)
-    """
-    resumes = {}
-    with open(csv_path, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            resumes[row['ID']] = {
-                'ID': row['ID'],
-                'Resume_str': row['Resume_str'],
-                'Resume_html': row['Resume_html']
-            }
-    return resumes
+class ScoreResult(BaseModel):
+    score: int
+    reasoning: str
 
 
-def load_job_requirements(file_path: str) -> str:
-    """Load job requirements from a markdown file."""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        return f.read()
+class EmailResult(BaseModel):
+    email_body: str
+
+
+class AgentDecision(BaseModel):
+    tool: str
+    parameters: dict
+    reasoning: str
+
+
+# ---------------------------------------------------------------------------
+# LLM call helper — uses Pydantic + strict JSON schema for reliable output
+# ---------------------------------------------------------------------------
+
+def _clean_schema(obj):
+    """Strip keys that OpenRouter's strict json_schema mode doesn't accept."""
+    if isinstance(obj, dict):
+        return {
+            k: _clean_schema(v)
+            for k, v in obj.items()
+            if k not in ("title", "minimum", "maximum", "exclusiveMinimum",
+                         "exclusiveMaximum", "default")
+        }
+    if isinstance(obj, list):
+        return [_clean_schema(item) for item in obj]
+    return obj
 
 
 def structured_llm_call(
     api_key: str,
     prompt: str,
     context_data: Dict[str, Any],
-    output_schema: Dict[str, Any],
-    model: str = "anthropic/claude-sonnet-4.6",
-    temperature: float = 0.2
+    output_schema: Type[BaseModel],
+    model: str = "anthropic/claude-sonnet-4-6",
+    temperature: float = 0.2,
+    strict: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Generic function for making structured LLM calls with OpenRouter.
+    """Make a structured LLM call via OpenRouter with Pydantic schema enforcement.
 
     Args:
-        api_key: OpenRouter API key
-        prompt: The instruction/task description
-        context_data: Dictionary of context (e.g., {'resume': '...', 'job_req': '...'})
-        output_schema: Dictionary describing the expected JSON structure
-        model: Model to use
-        temperature: Sampling temperature
-
-    Returns:
-        Dict with 'result', 'error', and 'usage'
+        output_schema: A Pydantic BaseModel class defining the expected output.
+        strict: If True (default), uses strict json_schema mode — the model is
+            forced to return JSON matching the schema exactly. Set to False for
+            schemas with dynamic fields (e.g. arbitrary dicts), which falls back
+            to json_object mode with the schema described in the prompt.
     """
-    # Build context section
     context_str = ""
     for key, value in context_data.items():
         if isinstance(value, str) and len(value) > 5000:
             value = value[:5000] + "\n... (truncated)"
         context_str += f"\n{key.upper()}:\n{value}\n"
 
-    # Build schema description
-    schema_str = json.dumps(output_schema, indent=2)
-
-    # Construct full prompt
-    full_prompt = f"""{prompt}
-
+    if strict:
+        full_prompt = f"{prompt}\n{context_str}" if context_str else prompt
+        schema = _clean_schema(output_schema.model_json_schema())
+        schema["additionalProperties"] = False
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": output_schema.__name__,
+                "strict": True,
+                "schema": schema,
+            },
+        }
+    else:
+        schema_str = json.dumps(output_schema.model_json_schema(), indent=2)
+        full_prompt = f"""{prompt}
 {context_str}
-
-Return a JSON object with this exact structure:
+Return a JSON object matching this schema:
 {schema_str}
 
-IMPORTANT: Return ONLY valid JSON, no additional text or markdown formatting."""
+Return ONLY valid JSON."""
+        response_format = {"type": "json_object"}
 
-    # Make API call
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -155,7 +174,7 @@ IMPORTANT: Return ONLY valid JSON, no additional text or markdown formatting."""
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": temperature,
         "max_tokens": 2000,
-        "response_format": {"type": "json_object"}
+        "response_format": response_format,
     }
 
     try:
@@ -163,22 +182,166 @@ IMPORTANT: Return ONLY valid JSON, no additional text or markdown formatting."""
             resp = client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-
             content = data["choices"][0]["message"]["content"]
-            result = json.loads(content)
-
-            return {
-                "result": result,
-                "error": None,
-                "usage": data.get("usage", {})
-            }
+            if not content:
+                return {"result": None, "error": "Empty response from model", "usage": data.get("usage", {})}
+            parsed = output_schema.model_validate_json(content)
+            return {"result": parsed.model_dump(), "error": None, "usage": data.get("usage", {})}
     except Exception as e:
-        return {
-            "result": None,
-            "error": str(e),
-            "usage": {}
-        }
+        return {"result": None, "error": str(e), "usage": {}}
 
+
+# ---------------------------------------------------------------------------
+# Agent loop machinery
+# ---------------------------------------------------------------------------
+
+def _agent_decide(api_key, candidate_id, action_history, tool_registry, model, temperature=0.3):
+    """Internal: agent decides which tool to call next."""
+    tools_desc = "\n".join([
+        f"- {name}: {info['description']}\n  Parameters: {json.dumps(info['parameters'])}"
+        for name, info in tool_registry.items()
+    ])
+
+    history_str = "\n".join([
+        f"Turn {i+1}: Called '{a['tool']}' -> {a['result']['message']}"
+        for i, a in enumerate(action_history)
+    ]) if action_history else "No actions taken yet."
+
+    prompt = f"""You are a hiring automation agent processing candidate {candidate_id}.
+
+AVAILABLE TOOLS:
+{tools_desc}
+
+ACTION HISTORY:
+{history_str}
+
+ROUTING RULES:
+- Score >= 80 -> outcome is INTERVIEW
+- Score 40-79 -> outcome is REVIEW
+- Score < 40 -> outcome is REJECT
+
+WORKFLOW:
+1. First call score_resume to get the candidate's score
+2. Then call draft_outreach_email with the appropriate outcome and key points from the scoring
+3. Finally call done
+
+Decide the NEXT action. You must follow the workflow order."""
+
+    result = structured_llm_call(
+        api_key=api_key,
+        prompt=prompt,
+        context_data={},
+        output_schema=AgentDecision,
+        model=model,
+        temperature=temperature,
+        strict=False,  # AgentDecision.parameters is dynamic (varies per tool)
+    )
+    return result["result"], result.get("usage", {})
+
+
+def run_agent(
+    api_key: str,
+    candidate_id: str,
+    tool_registry: dict,
+    model: str = "anthropic/claude-sonnet-4-6",
+    temperature: float = 0.3,
+    max_turns: int = 6,
+    verbose: bool = True,
+) -> dict:
+    """Run the agent loop for one candidate.
+
+    Returns dict with candidate_id, score, outcome, email_body,
+    num_turns, and actions (full action log).
+    """
+    action_history = []
+    total_cost = 0.0
+    score = None
+    outcome = None
+    email_body = None
+
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"  Processing: {candidate_id}")
+        print(f"{'='*70}")
+
+    for turn in range(1, max_turns + 1):
+        decision, decide_usage = _agent_decide(
+            api_key, candidate_id, action_history, tool_registry, model, temperature
+        )
+        total_cost += float(decide_usage.get("cost") or decide_usage.get("total_cost") or 0)
+
+        tool_name = decision.get("tool", "")
+        params = decision.get("parameters", {})
+        reasoning = decision.get("reasoning", "")
+
+        if verbose:
+            print(f"\n  Turn {turn}: {tool_name}")
+            print(f"    Reasoning: {reasoning}")
+
+        # Validate tool exists
+        if tool_name not in tool_registry:
+            if verbose:
+                print(f"    ERROR: Unknown tool '{tool_name}'")
+            break
+
+        # Execute tool
+        tool_fn = tool_registry[tool_name]["function"]
+        try:
+            result = tool_fn(**params)
+        except Exception as e:
+            result = {"status": "error", "message": str(e)}
+
+        if verbose:
+            print(f"    Result: {result['message']}")
+
+        # Track cost from tool usage (LLM-calling tools return usage)
+        tool_usage = result.get("usage", {})
+        total_cost += float(tool_usage.get("cost") or tool_usage.get("total_cost") or 0)
+
+        # Extract key outputs
+        if tool_name == "score_resume" and result.get("status") == "success":
+            score = result["score"]
+            outcome = "INTERVIEW" if score >= 80 else ("REVIEW" if score >= 40 else "REJECT")
+            if verbose:
+                print(f"    -> Score: {score}, Outcome: {outcome}")
+
+        if tool_name == "draft_outreach_email" and result.get("status") == "success":
+            email_body = result["email_body"]
+
+        # Log action
+        action_history.append({
+            "turn": turn,
+            "tool": tool_name,
+            "parameters": params,
+            "reasoning": reasoning,
+            "result": result,
+        })
+
+        # Check if done
+        if tool_name == "done" or result.get("final"):
+            break
+
+    if verbose:
+        cost_str = f"${total_cost:.4f}" if total_cost else "N/A"
+        print(f"\n  Done in {len(action_history)} turns | Outcome: {outcome} | Cost: {cost_str}")
+        if email_body:
+            preview = email_body[:200] + ("..." if len(email_body) > 200 else "")
+            print(f"\n  --- EMAIL ---\n  {preview}\n  --- END ---")
+
+    return {
+        "candidate_id": candidate_id,
+        "score": score,
+        "outcome": outcome,
+        "email_body": email_body,
+        "cost": total_cost if total_cost else None,
+        "num_turns": len(action_history),
+        "actions": action_history,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Lecture 4 leaderboard helpers (outreach-specific)
+# ---------------------------------------------------------------------------
 
 def submit_outreach(team_name, resume_id, outcome, email_text, score=None, cost=None, api_key="leaderboard-api-key"):
     """Submit an outreach email to the lecture 4 leaderboard."""
@@ -206,18 +369,6 @@ def delete_outreach(team_name, resume_id, api_key="leaderboard-api-key"):
     try:
         with httpx.Client(timeout=15) as client:
             resp = client.request("DELETE", url, json={"team_name": team_name, "resume_id": resume_id}, headers={"X-API-Key": api_key})
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def delete_team(team_name, api_key="leaderboard-api-key"):
-    """Delete all submissions for a team."""
-    url = f"{LEADERBOARD_BASE_URL}/lecture4/api/delete_team"
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.post(url, json={"team_name": team_name}, headers={"X-API-Key": api_key})
             resp.raise_for_status()
             return resp.json()
     except Exception as e:

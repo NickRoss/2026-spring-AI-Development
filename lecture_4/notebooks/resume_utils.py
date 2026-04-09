@@ -169,7 +169,7 @@ def submit_score(
     team_name: str,
     resume_id: str,
     score: float,
-    lecture: int = 3,
+    lecture: int = 4,
     cost: float | None = None,
     api_key: str = "leaderboard-api-key",
 ) -> dict:
@@ -200,7 +200,7 @@ def submit_score(
 def delete_score(
     team_name: str,
     resume_id: str,
-    lecture: int = 3,
+    lecture: int = 4,
     api_key: str = "leaderboard-api-key",
 ) -> dict:
     """Delete a single submission from the leaderboard."""
@@ -218,7 +218,7 @@ def delete_score(
 
 def delete_team(
     team_name: str,
-    lecture: int = 3,
+    lecture: int = 4,
     api_key: str = "leaderboard-api-key",
 ) -> dict:
     """Delete all submissions for a team from the leaderboard."""
