@@ -96,7 +96,7 @@ class EmailResult(BaseModel):
 
 class AgentDecision(BaseModel):
     tool: str
-    parameters: dict
+    parameters_json: str  # JSON string of tool parameters — parsed after validation
     reasoning: str
 
 
@@ -125,16 +125,12 @@ def structured_llm_call(
     output_schema: Type[BaseModel],
     model: str = "anthropic/claude-sonnet-4-6",
     temperature: float = 0.2,
-    strict: bool = True,
 ) -> Dict[str, Any]:
-    """Make a structured LLM call via OpenRouter with Pydantic schema enforcement.
+    """Make a structured LLM call via OpenRouter with Pydantic strict json_schema.
 
     Args:
-        output_schema: A Pydantic BaseModel class defining the expected output.
-        strict: If True (default), uses strict json_schema mode — the model is
-            forced to return JSON matching the schema exactly. Set to False for
-            schemas with dynamic fields (e.g. arbitrary dicts), which falls back
-            to json_object mode with the schema described in the prompt.
+        output_schema: A Pydantic BaseModel class. The model is forced to
+            return JSON matching this schema exactly (strict mode).
     """
     context_str = ""
     for key, value in context_data.items():
@@ -142,27 +138,10 @@ def structured_llm_call(
             value = value[:5000] + "\n... (truncated)"
         context_str += f"\n{key.upper()}:\n{value}\n"
 
-    if strict:
-        full_prompt = f"{prompt}\n{context_str}" if context_str else prompt
-        schema = _clean_schema(output_schema.model_json_schema())
-        schema["additionalProperties"] = False
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": output_schema.__name__,
-                "strict": True,
-                "schema": schema,
-            },
-        }
-    else:
-        schema_str = json.dumps(output_schema.model_json_schema(), indent=2)
-        full_prompt = f"""{prompt}
-{context_str}
-Return a JSON object matching this schema:
-{schema_str}
+    full_prompt = f"{prompt}\n{context_str}" if context_str else prompt
 
-Return ONLY valid JSON."""
-        response_format = {"type": "json_object"}
+    schema = _clean_schema(output_schema.model_json_schema())
+    schema["additionalProperties"] = False
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -174,7 +153,14 @@ Return ONLY valid JSON."""
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": temperature,
         "max_tokens": 2000,
-        "response_format": response_format,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": output_schema.__name__,
+                "strict": True,
+                "schema": schema,
+            },
+        },
     }
 
     try:
@@ -225,7 +211,8 @@ WORKFLOW:
 2. Then call draft_outreach_email with the appropriate outcome and key points from the scoring
 3. Finally call done
 
-Decide the NEXT action. You must follow the workflow order."""
+Decide the NEXT action. You must follow the workflow order.
+Return parameters_json as a JSON-encoded string of the tool parameters (e.g. '{{"candidate_id": "123"}}')."""
 
     result = structured_llm_call(
         api_key=api_key,
@@ -234,9 +221,17 @@ Decide the NEXT action. You must follow the workflow order."""
         output_schema=AgentDecision,
         model=model,
         temperature=temperature,
-        strict=False,  # AgentDecision.parameters is dynamic (varies per tool)
     )
-    return result["result"], result.get("usage", {})
+
+    # Parse parameters_json string into a dict
+    decision = result["result"]
+    if decision is not None:
+        try:
+            decision["parameters"] = json.loads(decision.pop("parameters_json"))
+        except (json.JSONDecodeError, KeyError):
+            decision["parameters"] = {}
+
+    return decision, result.get("usage", {})
 
 
 def run_agent(
@@ -269,6 +264,11 @@ def run_agent(
             api_key, candidate_id, action_history, tool_registry, model, temperature
         )
         total_cost += float(decide_usage.get("cost") or decide_usage.get("total_cost") or 0)
+
+        if decision is None:
+            if verbose:
+                print(f"\n  Turn {turn}: ERROR — agent decision failed")
+            break
 
         tool_name = decision.get("tool", "")
         params = decision.get("parameters", {})
