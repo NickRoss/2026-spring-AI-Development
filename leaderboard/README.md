@@ -17,7 +17,7 @@ Students build an agentic pipeline that reads a resume, decides an outcome (INTE
 
 | Home | Lecture 2 | Lecture 3 | Lecture 4 |
 |------|-----------|-----------|-----------|
-| ![Home](screenshots/home.png) | ![L2](screenshots/lecture2.png) | ![L3](screenshots/lecture3.png) | ![L4](screenshots/lecture4.png) |
+| ![Home](./screenshots/home.png) | ![L2](./screenshots/lecture2.png) | ![L3](./screenshots/lecture3.png) | ![L4](./screenshots/lecture4.png) |
 
 ## Running
 
