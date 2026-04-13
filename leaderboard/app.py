@@ -518,6 +518,35 @@ async def lecture3_metrics(team: str | None = None):
     return results
 
 
+@lecture3_router.post("/api/seed")
+async def lecture3_seed(x_api_key: str | None = Header(default=None)):
+    """Seed the database with test data: 15 teams x 10 resume IDs with gold/silver/wild."""
+    _check_api_key(x_api_key)
+    teams = [f"Team {name}" for name in [
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon",
+        "Zeta", "Eta", "Theta", "Iota", "Kappa",
+        "Lambda", "Mu", "Nu", "Xi", "Omicron",
+    ]]
+    # Pick gold, silver, and wild IDs
+    gold_ids = sorted(random.sample([r for r in LECTURE3_VALID_IDS if r.startswith("g")], min(3, len([r for r in LECTURE3_VALID_IDS if r.startswith("g")]))))
+    silver_ids = sorted(random.sample([r for r in LECTURE3_VALID_IDS if r.startswith("s")], min(3, len([r for r in LECTURE3_VALID_IDS if r.startswith("s")]))))
+    wild_ids = sorted(random.sample([r for r in LECTURE3_VALID_IDS if not r.startswith("g") and not r.startswith("s")], min(4, len([r for r in LECTURE3_VALID_IDS if not r.startswith("g") and not r.startswith("s")]))))
+    resume_ids = gold_ids + silver_ids + wild_ids
+    if not resume_ids:
+        resume_ids = ["g01", "g02", "g03", "s01", "s02", "s03", "10089434", "10247517", "10265057", "10840430"]
+    for team in teams:
+        for rid in resume_ids:
+            if rid.startswith("g"):
+                score = round(random.uniform(70, 99), 1)
+            elif rid.startswith("s"):
+                score = round(random.uniform(10, 45), 1)
+            else:
+                score = round(random.uniform(30, 70), 1)
+            cost = round(random.uniform(0.001, 0.01), 5)
+            add_submission(LECTURE3_DB_PATH, team, rid, score, cost=cost)
+    return {"status": "ok", "teams": len(teams), "resumes": len(resume_ids)}
+
+
 # ============================= LECTURE 4 ====================================
 
 lecture4_router = APIRouter(prefix="/lecture4", tags=["lecture4"])
@@ -683,6 +712,68 @@ async def lecture4_submissions():
 @lecture4_router.get("/api/health")
 async def lecture4_health():
     return {"status": "healthy"}
+
+
+@lecture4_router.post("/api/seed")
+async def lecture4_seed(x_api_key: str | None = Header(default=None)):
+    """Seed the database with test data: 15 teams x 8 resume IDs with outcomes."""
+    _check_api_key(x_api_key)
+
+    teams = [f"Team {name}" for name in [
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon",
+        "Zeta", "Eta", "Theta", "Iota", "Kappa",
+        "Lambda", "Mu", "Nu", "Xi", "Omicron",
+    ]]
+
+    resume_ids = ["g01", "g02", "s01", "s02", "10840430", "16899268", "24083609", "25990239"]
+
+    interview_emails = [
+        "We were impressed by your experience and would like to invite you to a technical interview. Our team will reach out to schedule a time.",
+        "Your background is an excellent match for this role. We'd love to move forward with a technical assessment.",
+        "After reviewing your application, we're confident you'd be a strong addition. Let's set up an interview.",
+    ]
+    reject_emails = [
+        "After careful consideration, we've decided to move forward with candidates whose experience more closely aligns with our needs.",
+        "We appreciate your interest but have decided to pursue other candidates at this time.",
+        "Thank you for applying. Unfortunately, we won't be moving forward with your candidacy.",
+    ]
+    review_emails = [
+        "Your application has been flagged for additional review by our hiring committee. You should hear back within a week.",
+        "We're reviewing your application in more detail. Our senior engineers will evaluate your candidacy this week.",
+    ]
+
+    count = 0
+    for team in teams:
+        num_resumes = random.randint(len(resume_ids) * 6 // 10, len(resume_ids))
+        selected = random.sample(resume_ids, num_resumes)
+        for rid in selected:
+            if rid.startswith("g"):
+                outcome = random.choices(["INTERVIEW", "REVIEW", "REJECT"], weights=[75, 20, 5])[0]
+                score = random.randint(78, 98)
+            elif rid.startswith("s"):
+                outcome = random.choices(["REJECT", "REVIEW", "INTERVIEW"], weights=[65, 25, 10])[0]
+                score = random.randint(30, 72)
+            else:
+                outcome = random.choices(["REJECT", "REVIEW", "INTERVIEW"], weights=[50, 30, 20])[0]
+                score = random.randint(5, 55)
+
+            if outcome == "INTERVIEW":
+                email = random.choice(interview_emails)
+            elif outcome == "REJECT":
+                email = random.choice(reject_emails)
+            else:
+                email = random.choice(review_emails)
+
+            email = f"Re: Application #{rid}\n\n{email}"
+            cost = round(random.uniform(0.001, 0.015), 5)
+
+            add_lecture4_submission(
+                LECTURE4_DB_PATH, team, rid, outcome, email,
+                score=score, cost=cost,
+            )
+            count += 1
+
+    return {"status": "ok", "teams": len(teams), "submissions": count}
 
 
 # ---------------------------------------------------------------------------

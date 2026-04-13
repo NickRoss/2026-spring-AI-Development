@@ -340,7 +340,7 @@
     <p class="subtitle">Resume Scoring &amp; Outreach Emails</p>
     <div class="controls">
         <button onclick="resetLeaderboard()">Reset Leaderboard</button>
-        <a href="/lecture3">&larr; Lecture 3</a>
+        <a href="/">&larr; Home</a>
     </div>
 
     {% if team_names %}
@@ -354,7 +354,7 @@
                         <div class="header-wrapper">
                             <span>{{ team }}</span>
                             <div class="dropdown-anchor">
-                                <button class="gear-btn" onclick="openGear(event, 'team', '{{ team }}')">&#9881;</button>
+                                <button class="gear-btn" onclick="openGear(event, 'team', '{{ team }}', {{ loop.index }})">&#9881;</button>
                             </div>
                         </div>
                     </th>
@@ -368,7 +368,7 @@
                         <div class="header-wrapper">
                             <span>{{ rid }}</span>
                             <div class="dropdown-anchor">
-                                <button class="gear-btn" onclick="openGear(event, 'resume', '{{ rid }}')">&#9881;</button>
+                                <button class="gear-btn" onclick="openGear(event, 'resume', '{{ rid }}', {{ loop.index - 1 }})">&#9881;</button>
                             </div>
                         </div>
                     </td>
@@ -466,7 +466,7 @@
         });
 
         /* ---- Shared dropdown ---- */
-        function openGear(event, type, id) {
+        function openGear(event, type, id, index) {
             event.stopPropagation();
             const dd = document.getElementById('sharedDropdown');
             const wasOpen = dd.classList.contains('show');
@@ -475,9 +475,13 @@
 
             let html = '';
             if (type === 'team') {
-                html = '<button class="danger" onclick="deleteTeam(\'' + id + '\')">Delete Team</button>';
+                html += '<button onclick="sortByColumn(' + index + ', \'asc\')">Sort Ascending</button>';
+                html += '<button onclick="sortByColumn(' + index + ', \'desc\')">Sort Descending</button>';
+                html += '<button class="danger" onclick="deleteTeam(\'' + id + '\')">Delete Team</button>';
             } else {
-                html = '<button onclick="closeDropdowns();openEmailSlideshow(\'' + id + '\')">View Emails</button>';
+                html += '<button onclick="sortByRow(' + index + ', \'asc\')">Sort Ascending</button>';
+                html += '<button onclick="sortByRow(' + index + ', \'desc\')">Sort Descending</button>';
+                html += '<button onclick="closeDropdowns();openEmailSlideshow(\'' + id + '\')">View Emails</button>';
                 html += '<button class="danger" onclick="deleteResume(\'' + id + '\')">Delete Resume</button>';
             }
             dd.innerHTML = html;

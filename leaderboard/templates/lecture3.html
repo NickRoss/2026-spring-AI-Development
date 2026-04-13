@@ -129,24 +129,21 @@
         }
         .gear-btn:hover { color: #fff; }
         .dropdown-anchor {
-            position: relative;
             display: inline-block;
         }
-        .dropdown-menu {
+        /* Shared dropdown rendered at body level */
+        #sharedDropdown {
             display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
+            position: fixed;
             background: white;
             border: 1px solid #ddd;
             border-radius: 4px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            z-index: 100;
+            z-index: 9999;
             min-width: 140px;
-            overflow: hidden;
         }
-        .dropdown-menu.show { display: block; }
-        .dropdown-menu button {
+        #sharedDropdown.show { display: block; }
+        #sharedDropdown button {
             display: block;
             width: 100%;
             padding: 0.5rem 0.8rem;
@@ -157,9 +154,9 @@
             font-size: 0.82rem;
             color: #333;
         }
-        .dropdown-menu button:hover { background: #f0f0f0; }
-        .dropdown-menu button.danger { color: #e74c3c; }
-        .dropdown-menu button.danger:hover { background: #fdecea; }
+        #sharedDropdown button:hover { background: #f0f0f0; }
+        #sharedDropdown button.danger { color: #e74c3c; }
+        #sharedDropdown button.danger:hover { background: #fdecea; }
     </style>
 </head>
 <body>
@@ -167,7 +164,7 @@
     <p class="subtitle">Gold/Silver discrimination &middot; Context Engineering</p>
     <div class="controls">
         <button onclick="resetLeaderboard()">Reset Leaderboard</button>
-        <a href="/lecture2">&larr; Lecture 2</a>
+        <a href="/">&larr; Home</a>
     </div>
 
     {% if team_names %}
@@ -181,12 +178,7 @@
                         <div class="header-wrapper">
                             <span>{{ team }}</span>
                             <div class="dropdown-anchor">
-                                <button class="gear-btn" onclick="toggleDropdown(event, 'col-dd-{{ loop.index }}')">&#9881;</button>
-                                <div id="col-dd-{{ loop.index }}" class="dropdown-menu">
-                                    <button onclick="sortByColumn({{ loop.index }}, 'asc')">Sort Ascending</button>
-                                    <button onclick="sortByColumn({{ loop.index }}, 'desc')">Sort Descending</button>
-                                    <button class="danger" onclick="deleteTeam('{{ team }}')">Delete Column</button>
-                                </div>
+                                <button class="gear-btn" onclick="openGear(event, 'team', '{{ team }}', {{ loop.index }})">&#9881;</button>
                             </div>
                         </div>
                     </th>
@@ -200,12 +192,7 @@
                         <div class="header-wrapper">
                             <span>{{ rid }}</span>
                             <div class="dropdown-anchor">
-                                <button class="gear-btn" onclick="toggleDropdown(event, 'row-dd-{{ loop.index }}')">&#9881;</button>
-                                <div id="row-dd-{{ loop.index }}" class="dropdown-menu">
-                                    <button onclick="sortByRow({{ loop.index - 1 }}, 'asc')">Sort Ascending</button>
-                                    <button onclick="sortByRow({{ loop.index - 1 }}, 'desc')">Sort Descending</button>
-                                    <button class="danger" onclick="deleteResume('{{ rid }}')">Delete Row</button>
-                                </div>
+                                <button class="gear-btn" onclick="openGear(event, 'resume', '{{ rid }}', {{ loop.index - 1 }})">&#9881;</button>
                             </div>
                         </div>
                     </td>
@@ -232,23 +219,43 @@
 
     <p class="refresh-note">Auto-refreshes every 10 seconds</p>
 
+    <!-- Shared dropdown (rendered outside table to avoid stacking context issues) -->
+    <div id="sharedDropdown"></div>
+
     <script>
         setTimeout(() => location.reload(), 10000);
 
         const API_KEY = "{{ api_key }}";
         const LECTURE = "lecture3";
 
-        /* ---- Dropdown toggle ---- */
-        function toggleDropdown(event, id) {
+        /* ---- Shared dropdown ---- */
+        function openGear(event, type, id, index) {
             event.stopPropagation();
-            document.querySelectorAll('.dropdown-menu.show').forEach(el => {
-                if (el.id !== id) el.classList.remove('show');
-            });
-            document.getElementById(id).classList.toggle('show');
+            const dd = document.getElementById('sharedDropdown');
+            const wasOpen = dd.classList.contains('show');
+            dd.classList.remove('show');
+            if (wasOpen) return;
+
+            let html = '';
+            if (type === 'team') {
+                html += '<button onclick="sortByColumn(' + index + ', \'asc\')">Sort Ascending</button>';
+                html += '<button onclick="sortByColumn(' + index + ', \'desc\')">Sort Descending</button>';
+                html += '<button class="danger" onclick="deleteTeam(\'' + id + '\')">Delete Column</button>';
+            } else {
+                html += '<button onclick="sortByRow(' + index + ', \'asc\')">Sort Ascending</button>';
+                html += '<button onclick="sortByRow(' + index + ', \'desc\')">Sort Descending</button>';
+                html += '<button class="danger" onclick="deleteResume(\'' + id + '\')">Delete Row</button>';
+            }
+            dd.innerHTML = html;
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            dd.style.top = (rect.bottom + 4) + 'px';
+            dd.style.left = Math.min(rect.left, window.innerWidth - 160) + 'px';
+            dd.classList.add('show');
         }
 
         document.addEventListener('click', () => {
-            document.querySelectorAll('.dropdown-menu.show').forEach(el => el.classList.remove('show'));
+            document.getElementById('sharedDropdown').classList.remove('show');
         });
 
         /* ---- Sorting ---- */
@@ -344,7 +351,7 @@
         }
 
         function closeDropdowns() {
-            document.querySelectorAll('.dropdown-menu.show').forEach(el => el.classList.remove('show'));
+            document.getElementById('sharedDropdown').classList.remove('show');
         }
     </script>
 </body>
